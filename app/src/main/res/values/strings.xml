@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">DF Shield</string>
+    <string name="app_tagline">আপনার ডিজিটাল গোপনীয়তার জন্য সহজ সুরক্ষা।</string>
+    <string name="protection_on">সুরক্ষা চালু</string>
+    <string name="protection_off">সুরক্ষা বন্ধ</string>
+    <string name="protection_paused">সুরক্ষা বিরতিতে আছে</string>
+    <string name="enable_protection">সুরক্ষা চালু করুন</string>
+    <string name="pause">বিরতি</string>
+    <string name="resume">আবার চালু করুন</string>
+    <string name="ads_blocked">বিজ্ঞাপন ব্লক</string>
+    <string name="trackers_blocked">ট্র্যাকার ব্লক</string>
+    <string name="threats_blocked">হুমকি ব্লক</string>
+    <string name="filters">ফিল্টার</string>
+    <string name="allowlist">অনুমোদিত তালিকা</string>
+    <string name="app_management">অ্যাপ সুরক্ষা</string>
+    <string name="statistics">পরিসংখ্যান</string>
+    <string name="settings">সেটিংস</string>
+    <string name="youtube_support">YouTube সুরক্ষা</string>
+    <string name="faq_help">FAQ / সাহায্য</string>
+    <string name="vpn_permission_desc">লোকাল ট্র্যাফিক ও ডিএনএস ফিল্টারিং সক্রিয় করতে VPN অনুমতি প্রয়োজন। আপনার কোনও ডেটা বাইরের সার্ভারে যায় না।</string>
+</resources>

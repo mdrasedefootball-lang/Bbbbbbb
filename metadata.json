@@ -1,0 +1,6 @@
+{
+  "name": "DF Shield",
+  "description": "Fast, privacy-focused Android ad blocking and tracker protection utility with one-tap security and Bangla-first interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
