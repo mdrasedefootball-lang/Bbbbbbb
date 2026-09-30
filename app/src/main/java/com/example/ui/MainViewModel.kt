@@ -159,7 +159,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 context.startService(intent)
                 repository.setProtectionState(ProtectionState.ENABLED)
-                showFeedback("সুরক্ষা চালু হয়েছে।")
+                showFeedback("অ্যাড ব্লকার চালু হয়েছে। আপনার ইন্টারনেট পূর্ণ গতিতে সচল আছে।")
             } catch (e: Exception) {
                 e.printStackTrace()
                 repository.setProtectionState(ProtectionState.ERROR)

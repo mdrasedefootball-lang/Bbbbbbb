@@ -337,12 +337,12 @@ fun ProtectionStatusCard(
 
                 Text(
                     text = when {
-                        isEnabled -> "DF Shield আপনার ডিভাইসকে সুরক্ষিত রাখছে।"
+                        isEnabled -> "ইন্টারনেট সম্পূর্ণ গতিতে সচল আছে এবং শুধু অনাকাঙ্ক্ষিত বিজ্ঞাপন ও ট্র্যাকার ব্লক হচ্ছে।"
                         isPaused -> {
                             val min = (pauseRemainingSeconds / 60)
                             "আবার চালু হবে: ${if (min > 0) "$min মিনিট পরে" else "$pauseRemainingSeconds সেকেন্ড পরে"}"
                         }
-                        else -> "আপনার সুরক্ষা বর্তমানে সক্রিয় নয়।"
+                        else -> "আপনার সুরক্ষা বন্ধ আছে। শুধু বিজ্ঞাপন ব্লক করতে চালু করুন।"
                     },
                     fontSize = 14.sp,
                     color = ShieldTextSecondary,
