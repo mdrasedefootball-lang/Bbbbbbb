@@ -293,14 +293,10 @@ fun HomeScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        SummaryCheckItem(text = "বিজ্ঞাপন ফিল্টার সক্রিয়", isChecked = true)
-                        SummaryCheckItem(text = "ট্র্যাকার সুরক্ষা সক্রিয়", isChecked = true)
-                        SummaryCheckItem(text = "হুমকি সুরক্ষা সক্রিয়", isChecked = true)
-                        SummaryCheckItem(
-                            text = if (httpsFiltering) "HTTPS ফিল্টারিং চালু" else "HTTPS ফিল্টারিং বন্ধ",
-                            isChecked = httpsFiltering,
-                            isDim = !httpsFiltering
-                        )
+                        SummaryCheckItem(text = "ফোনের সব অ্যাপ ও গেমের বিজ্ঞাপন ব্লক সক্রিয়", isChecked = true)
+                        SummaryCheckItem(text = "ব্রাউজার পপ-আপ ও ব্যানার অ্যাড ব্লকার সক্রিয়", isChecked = true)
+                        SummaryCheckItem(text = "ইন্টারনেট ফুল স্পিড ও ডেটা ট্র্যাকার সুরক্ষা", isChecked = true)
+                        SummaryCheckItem(text = "ইউটিউব ও সোশ্যাল মিডিয়া অ্যাড শিল্ড", isChecked = true)
                     }
                 }
             }

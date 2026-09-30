@@ -105,6 +105,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingYouTubeUrl = MutableStateFlow<String?>(null)
     val pendingYouTubeUrl: StateFlow<String?> = _pendingYouTubeUrl.asStateFlow()
 
+    fun setPendingYouTubeUrl(url: String?) {
+        _pendingYouTubeUrl.value = url
+    }
+
+    fun clearPendingYouTubeUrl() {
+        _pendingYouTubeUrl.value = null
+    }
+
     fun navigateTo(screen: Screen) {
         val current = _screenStack.value.toMutableList()
         // Avoid duplicate pushes

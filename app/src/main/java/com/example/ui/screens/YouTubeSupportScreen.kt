@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -14,32 +15,32 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.service.YouTubeAdSkipAccessibilityService
 import com.example.ui.MainViewModel
 import com.example.ui.components.PrimaryButton
 import com.example.ui.theme.ShieldAccentGreen
@@ -84,7 +86,6 @@ import com.example.ui.theme.ShieldTextPrimary
 import com.example.ui.theme.ShieldTextSecondary
 import com.example.ui.theme.ShieldTextTertiary
 import com.example.ui.theme.ShieldWarning
-import com.example.ui.theme.ShieldWarningContainer
 import java.io.ByteArrayInputStream
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -94,29 +95,45 @@ fun YouTubeSupportScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val pendingUrl by viewModel.pendingYouTubeUrl.collectAsState()
     val totalBlocked by viewModel.youtubeAdsBlocked.collectAsState()
+    val pendingUrl by viewModel.pendingYouTubeUrl.collectAsState()
 
-    var inputUrl by remember { mutableStateOf(pendingUrl ?: "") }
-    var currentWebUrl by remember {
-        mutableStateOf(
-            if (!pendingUrl.isNullOrBlank()) {
-                getCleanVideoUrl(pendingUrl!!)
-            } else {
-                "https://m.youtube.com"
-            }
-        )
-    }
-
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var adShieldActive by remember { mutableStateOf(true) }
+    var currentWebUrl by remember { mutableStateOf("https://m.youtube.com") }
+    var inputUrl by remember { mutableStateOf("") }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var sessionBlockedCount by remember { mutableIntStateOf(0) }
-    var isBrowseMode by remember { mutableStateOf(true) }
+    var isAutoSkipActive by remember { mutableStateOf(YouTubeAdSkipAccessibilityService.isServiceRunning) }
+
+    fun getCleanVideoUrl(rawUrl: String): String {
+        return try {
+            val uri = Uri.parse(rawUrl.trim())
+            when {
+                rawUrl.contains("youtu.be/") -> {
+                    val id = uri.lastPathSegment
+                    if (!id.isNullOrEmpty()) "https://m.youtube.com/watch?v=$id" else rawUrl
+                }
+                rawUrl.contains("youtube.com/shorts/") -> {
+                    val id = uri.lastPathSegment
+                    if (!id.isNullOrEmpty()) "https://m.youtube.com/watch?v=$id" else rawUrl
+                }
+                rawUrl.contains("youtube.com/watch") -> {
+                    val id = uri.getQueryParameter("v")
+                    if (!id.isNullOrEmpty()) "https://m.youtube.com/watch?v=$id" else rawUrl
+                }
+                rawUrl.startsWith("http://") || rawUrl.startsWith("https://") -> rawUrl
+                rawUrl.isNotBlank() -> "https://m.youtube.com/results?search_query=${Uri.encode(rawUrl)}"
+                else -> "https://m.youtube.com"
+            }
+        } catch (_: Exception) {
+            rawUrl
+        }
+    }
 
     LaunchedEffect(pendingUrl) {
         if (!pendingUrl.isNullOrBlank()) {
             val target = getCleanVideoUrl(pendingUrl!!)
-            inputUrl = pendingUrl!!
+            viewModel.clearPendingYouTubeUrl()
             currentWebUrl = target
             webViewRef?.loadUrl(target)
         }
@@ -131,32 +148,79 @@ fun YouTubeSupportScreen(
         "youtube.com/pagead",
         "youtube.com/ptracking",
         "youtube.com/api/stats/qoe",
-        "static.doubleclick.net"
+        "static.doubleclick.net",
+        "youtube.com/get_midroll_info"
     )
 
+    // Ultimate uBlock Origin + SponsorBlock Engine for YouTube
     val adBlockScript = """
         (function() {
-            function removeAds() {
-                // 1. Click skip ad buttons immediately
+            if (window.__dfShieldInstalled) return;
+            window.__dfShieldInstalled = true;
+
+            // 1. Hook JSON.parse to remove ad placements before player config loads
+            var origParse = JSON.parse;
+            JSON.parse = function() {
+                var res = origParse.apply(this, arguments);
+                try {
+                    if (res && typeof res === 'object') {
+                        if (res.adPlacements) res.adPlacements = [];
+                        if (res.playerAds) res.playerAds = [];
+                        if (res.adSlots) res.adSlots = [];
+                    }
+                } catch(e) {}
+                return res;
+            };
+
+            // 2. Intercept fetch & XHR to drop ad tracking
+            var adUrls = [
+                '/api/stats/ads', '/pagead/', 'googleads.g.doubleclick.net',
+                '/ptracking', '/get_midroll_info', 'static.doubleclick.net'
+            ];
+            function isAdUrl(u) {
+                if (!u) return false;
+                var str = String(u).toLowerCase();
+                for (var i = 0; i < adUrls.length; i++) {
+                    if (str.indexOf(adUrls[i]) !== -1) return true;
+                }
+                return false;
+            }
+
+            var origFetch = window.fetch;
+            if (origFetch) {
+                window.fetch = function(input, init) {
+                    var u = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                    if (isAdUrl(u)) {
+                        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+                    }
+                    return origFetch.apply(this, arguments);
+                };
+            }
+
+            // 3. Fast auto-skip & ad suppressor loop (every 30ms)
+            function executeAutoSkip() {
+                // Click skip button immediately
                 var skipButtons = document.querySelectorAll(
-                    '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton, .ytp-ad-overlay-close-button, .ytm-ad-overlay-close-button'
+                    '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton, ' +
+                    '.ytp-skip-ad-button, .ytp-ad-skip-button-text, .ytp-ad-overlay-close-button, ' +
+                    '.ytm-ad-overlay-close-button'
                 );
                 for (var i = 0; i < skipButtons.length; i++) {
-                    skipButtons[i].click();
+                    try { skipButtons[i].click(); } catch(e) {}
                 }
 
-                // 2. Fast forward video ads
+                // If ad is playing: fast forward to end and mute
                 var video = document.querySelector('video');
                 var adShowing = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
                 if (video && adShowing) {
                     video.muted = true;
-                    if (video.duration && isFinite(video.duration)) {
+                    video.playbackRate = 16.0;
+                    if (video.duration && isFinite(video.duration) && video.duration > 0) {
                         video.currentTime = video.duration;
                     }
-                    video.playbackRate = 16.0;
                 }
 
-                // 3. Hide all ad containers & sponsored elements
+                // Remove banner ads and sponsored shelves
                 var adSelectors = [
                     '.ytp-ad-overlay-container', '.ytp-ad-module', '.video-ads',
                     'ytd-promoted-sparkles-web-renderer', 'ytd-display-ad-renderer',
@@ -164,43 +228,33 @@ fun YouTubeSupportScreen(
                     'ytd-ad-slot-renderer', '#player-ads', '.sparkles-light-cta',
                     'ytd-promoted-video-renderer', 'ytd-compact-promoted-video-renderer',
                     'ytm-promoted-sparkles-web-renderer', 'ytm-companion-ad-renderer',
-                    'ytm-ad-slot-renderer', 'ytm-promoted-video-renderer'
+                    'ytm-ad-slot-renderer', 'ytm-promoted-video-renderer', '.ytp-ad-message-container'
                 ];
                 for (var s = 0; s < adSelectors.length; s++) {
                     var els = document.querySelectorAll(adSelectors[s]);
                     for (var j = 0; j < els.length; j++) {
                         els[j].style.display = 'none';
-                        els[j].remove();
+                        try { els[j].remove(); } catch(e) {}
                     }
                 }
             }
 
-            // Run repeatedly to catch dynamic ads
-            if (!window.__dfShieldInstalled) {
-                window.__dfShieldInstalled = true;
-                setInterval(removeAds, 50);
+            setInterval(executeAutoSkip, 30);
 
-                try {
-                    var observer = new MutationObserver(function() {
-                        removeAds();
-                    });
-                    if (document.body) {
-                        observer.observe(document.body, { childList: true, subtree: true });
-                    }
-                } catch(e) {}
+            // 4. Cosmetic style injection
+            var style = document.createElement('style');
+            style.textContent = `
+                .video-ads, .ytp-ad-module, .ytp-ad-overlay-container,
+                .ytp-ad-player-overlay, ytd-promoted-sparkles-web-renderer,
+                ytd-display-ad-renderer, ytd-ad-slot-renderer, #player-ads,
+                .sparkles-light-cta, ytd-promoted-video-renderer,
+                ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer,
+                ytm-ad-slot-renderer, .ytp-ad-message-container,
+                ytd-in-feed-ad-layout-renderer { display: none !important; opacity: 0 !important; }
+            `;
+            (document.head || document.documentElement).appendChild(style);
 
-                var style = document.createElement('style');
-                style.textContent = `
-                    .video-ads, .ytp-ad-module, .ytp-ad-overlay-container,
-                    .ytp-ad-player-overlay, ytd-promoted-sparkles-web-renderer,
-                    ytd-display-ad-renderer, ytd-ad-slot-renderer, #player-ads,
-                    .sparkles-light-cta, ytd-promoted-video-renderer,
-                    ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer,
-                    ytm-ad-slot-renderer { display: none !important; }
-                `;
-                document.head.appendChild(style);
-            }
-            removeAds();
+            executeAutoSkip();
         })();
     """.trimIndent()
 
@@ -225,7 +279,7 @@ fun YouTubeSupportScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
@@ -247,34 +301,20 @@ fun YouTubeSupportScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "YouTube সুরক্ষা",
-                            fontSize = 18.sp,
+                            text = "YouTube সুরক্ষা ও অটো-স্কিপ",
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = ShieldTextPrimary
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(ShieldAccentGreenContainer)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "বিজ্ঞাপন ব্লক সক্রিয়",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = ShieldAccentGreen
-                            )
-                        }
                     }
                     Text(
-                        text = "ভিডিও প্রি-রোল ও ব্যানার অ্যাড দমন মোড",
+                        text = "uBlock + AdGuard হাইব্রিড অ্যাড ব্লকার",
                         fontSize = 11.sp,
-                        color = ShieldTextSecondary
+                        color = ShieldAccentGreen,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
-                // Refresh button
                 IconButton(
                     onClick = { webViewRef?.reload() },
                     modifier = Modifier
@@ -291,11 +331,120 @@ fun YouTubeSupportScreen(
                 }
             }
 
-            // Status & Counter Banner
+            // Official YouTube App Auto-Skip Banner Card
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = ShieldSurfaceCard),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFF0000).copy(alpha = 0.4f))
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFF0000).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF0000),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "অফিসিয়াল YouTube অ্যাপে অটো-স্কিপ",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ShieldTextPrimary
+                                )
+                                Text(
+                                    text = "আসল YouTube অ্যাপে বিজ্ঞাপন আসা মাত্রই স্কিপ হবে",
+                                    fontSize = 11.sp,
+                                    color = ShieldTextSecondary
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isAutoSkipActive) ShieldAccentGreenContainer
+                                    else ShieldWarning.copy(alpha = 0.2f)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isAutoSkipActive) "সক্রিয় ✓" else "অনুমতি প্রয়োজন",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isAutoSkipActive) ShieldAccentGreen else ShieldWarning
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "মোট স্কিপ করা বিজ্ঞাপন: ${totalBlocked + sessionBlockedCount}টি",
+                            fontSize = 11.sp,
+                            color = ShieldAccentGreen,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Button(
+                            onClick = {
+                                try {
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                } catch (_: Exception) {}
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAutoSkipActive) ShieldSurfaceElevated else Color(0xFFFF0000),
+                                contentColor = if (isAutoSkipActive) ShieldTextPrimary else Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isAutoSkipActive) "সেটিংস চেক" else "অটো-স্কিপ চালু করুন",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // In-app Video Player Status & Switch
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = ShieldSurfaceCard),
                 border = CardDefaults.outlinedCardBorder().copy(
@@ -305,7 +454,7 @@ fun YouTubeSupportScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -314,23 +463,15 @@ fun YouTubeSupportScreen(
                             imageVector = Icons.Default.VerifiedUser,
                             contentDescription = null,
                             tint = ShieldAccentGreen,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "DF Shield Ad-Suppressor",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = ShieldTextPrimary
-                            )
-                            Text(
-                                text = "ব্লক করা বিজ্ঞাপন: ${totalBlocked + sessionBlockedCount}টি",
-                                fontSize = 11.sp,
-                                color = ShieldAccentGreen,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "ইন-অ্যাপ ক্লিন প্লেয়ার (uBlock Engine)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ShieldTextPrimary
+                        )
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -367,7 +508,7 @@ fun YouTubeSupportScreen(
                 OutlinedTextField(
                     value = inputUrl,
                     onValueChange = { inputUrl = it },
-                    placeholder = { Text("ভিডিও লিংক বা সার্চ লিখুন...", fontSize = 12.sp, color = ShieldTextTertiary) },
+                    placeholder = { Text("ভিডিও লিংক পেস্ট করুন বা সার্চ লিখুন...", fontSize = 12.sp, color = ShieldTextTertiary) },
                     singleLine = true,
                     modifier = Modifier
                         .weight(1f)
@@ -394,7 +535,7 @@ fun YouTubeSupportScreen(
                     },
                     modifier = Modifier
                         .height(48.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .testTag("youtube_go_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = ShieldAccentGreen,
@@ -457,7 +598,6 @@ fun YouTubeSupportScreen(
                                                     sessionBlockedCount++
                                                 }
                                                 viewModel.recordYouTubeBlocked()
-                                                // Return empty response to drop the ad request
                                                 return WebResourceResponse(
                                                     "text/plain",
                                                     "UTF-8",
@@ -496,25 +636,4 @@ fun YouTubeSupportScreen(
             }
         }
     }
-}
-
-private fun getCleanVideoUrl(input: String): String {
-    val trimmed = input.trim()
-    val id = extractYouTubeId(trimmed)
-    return if (id != null) {
-        "https://www.youtube-nocookie.com/embed/$id?autoplay=1&rel=0&iv_load_policy=3"
-    } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-        trimmed
-    } else {
-        "https://m.youtube.com/results?search_query=" + Uri.encode(trimmed)
-    }
-}
-
-private fun extractYouTubeId(url: String): String? {
-    val pattern = "(?<=watch\\?v=|/videos/|embed\\/|youtu.be\\/|\\/v\\/|\\/e\\/|watch\\?v%3D|watch\\?feature=player_embedded&v=)[^#\\&\\?\\n]*"
-    val compiledPattern = java.util.regex.Pattern.compile(pattern)
-    val matcher = compiledPattern.matcher(url)
-    return if (matcher.find()) {
-        matcher.group()
-    } else null
 }

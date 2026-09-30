@@ -18,4 +18,5 @@
     <string name="youtube_support">YouTube সুরক্ষা</string>
     <string name="faq_help">FAQ / সাহায্য</string>
     <string name="vpn_permission_desc">লোকাল ট্র্যাফিক ও ডিএনএস ফিল্টারিং সক্রিয় করতে VPN অনুমতি প্রয়োজন। আপনার কোনও ডেটা বাইরের সার্ভারে যায় না।</string>
+    <string name="accessibility_service_description">অফিসিয়াল YouTube অ্যাপে বিজ্ঞাপন আসার সাথে সাথে স্বয়ংক্রিয়ভাবে স্কিপ (Skip Ad) করতে এই অ্যাক্সেসিবিলিটি সার্ভিসটি ব্যবহার করা হয়।</string>
 </resources>
